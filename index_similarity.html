@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Similarity Transformation</title>
+<style>
+:root{--bg:#f6f7fb;--card:#fff;--text:#1b1f2a;--muted:#667085;--line:#e3e6ee;--axis:#98a2b3;--orig:#2563eb;--img:#dc2626;--accent:#2563eb}
+@media (prefers-color-scheme:dark){:root{--bg:#10131a;--card:#181c26;--text:#e8ebf2;--muted:#9aa3b5;--line:#2a3040;--axis:#6b7488;--orig:#60a5fa;--img:#f87171;--accent:#60a5fa}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;padding:16px}
+h1{font-size:1.4rem;margin:0 0 4px}
+.sub{color:var(--muted);margin:0 0 16px}
+.wrap{max-width:1100px;margin:0 auto;display:grid;gap:16px;grid-template-columns:minmax(0,1fr) 340px}
+@media (max-width:860px){.wrap{grid-template-columns:1fr}}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;transition:box-shadow .2s}
+.card:hover{box-shadow:0 4px 18px rgba(0,0,0,.08)}
+svg{width:100%;height:auto;display:block;max-height:80vh}
+label{display:flex;justify-content:space-between;font-weight:600;font-size:.9rem;margin-top:12px}
+label output{color:var(--accent);font-variant-numeric:tabular-nums}
+input[type=range]{width:100%;accent-color:var(--accent)}
+select,button{font:inherit;padding:8px 12px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--text);cursor:pointer}
+button{background:var(--accent);color:#fff;border:0;transition:transform .1s,opacity .2s}
+button:hover{opacity:.9}button:active{transform:scale(.97)}
+.row{display:flex;gap:8px;align-items:center;margin-top:12px;flex-wrap:wrap}
+.formula{font-family:ui-monospace,Menlo,monospace;font-size:.85rem;background:var(--bg);padding:8px 10px;border-radius:8px;margin:0 0 4px}
+.mat{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;font-family:ui-monospace,Menlo,monospace;font-size:.85rem;margin-top:8px}
+.mat span{background:var(--bg);padding:6px;border-radius:6px;text-align:center}
+table{width:100%;border-collapse:collapse;font-size:.85rem;margin-top:8px;font-variant-numeric:tabular-nums}
+th,td{text-align:center;padding:4px;border-bottom:1px solid var(--line)}
+h2{font-size:1rem;margin:16px 0 4px}
+.ok{color:#16a34a;font-weight:600}
+.legend{display:flex;gap:16px;font-size:.85rem;margin-top:8px;color:var(--muted)}
+.dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px}
+</style>
+</head>
+<body>
+<div style="max-width:1100px;margin:0 auto">
+<h1>Similarity Transformation</h1>
+<p class="sub">Scaling + rotation + translation (+ reflection) as one 3×3 matrix: <b>P′ = T · R · F · S · P</b></p>
+</div>
+<div class="wrap">
+  <div class="card">
+    <svg id="plot" viewBox="0 0 600 600" role="img" aria-label="Original and transformed shape"></svg>
+    <div class="legend"><span><i class="dot" style="background:var(--orig)"></i>Original</span><span><i class="dot" style="background:var(--img)"></i>Image</span></div>
+  </div>
+  <div class="card">
+    <div class="row" style="margin-top:0"><select id="shape" aria-label="Shape"></select><button id="reset">Reset</button></div>
+    <label>Scale s <output id="o_s"></output></label>
+    <input type="range" id="s" min="0.2" max="3" step="0.05" value="1.5">
+    <label>Rotation θ <output id="o_t"></output></label>
+    <input type="range" id="t" min="-180" max="180" step="1" value="45">
+    <label>Translate x <output id="o_x"></output></label>
+    <input type="range" id="x" min="-8" max="8" step="0.5" value="3">
+    <label>Translate y <output id="o_y"></output></label>
+    <input type="range" id="y" min="-8" max="8" step="0.5" value="2">
+    <div class="row"><label style="margin:0;gap:8px;font-weight:500"><input type="checkbox" id="f"> Reflect across x-axis</label></div>
+
+    <h2>Matrix M = T·R·F·S</h2>
+    <div class="formula">[s·cosθ −s·sinθ tx; s·sinθ s·cosθ ty; 0 0 1]</div>
+    <div class="mat" id="mat"></div>
+
+    <h2>Coordinates</h2>
+    <table id="tbl"></table>
+
+    <h2>Similarity check</h2>
+    <div id="chk"></div>
+  </div>
+</div>
+
+<script>
+const SHAPES={
+  "Triangle":[[1,1],[4,1],[2,3]],
+  "Square":[[1,1],[3,1],[3,3],[1,3]],
+  "Arrow":[[0,0],[3,0],[3,-1],[5,1],[3,3],[3,2],[0,2]]
+};
+const DEF={s:1.5,t:45,x:3,y:2,f:false};
+const $=id=>document.getElementById(id);
+const sel=$("shape");
+Object.keys(SHAPES).forEach(k=>sel.add(new Option(k,k)));
+
+// ---- matrix helpers (3x3 homogeneous) ----
+const mul=(A,B)=>A.map((_,i)=>B[0].map((_,j)=>A[i].reduce((s,_,k)=>s+A[i][k]*B[k][j],0)));
+const S=s=>[[s,0,0],[0,s,0],[0,0,1]];
+const R=d=>{const a=d*Math.PI/180,c=Math.cos(a),n=Math.sin(a);return[[c,-n,0],[n,c,0],[0,0,1]]};
+const T=(x,y)=>[[1,0,x],[0,1,y],[0,0,1]];
+const F=on=>[[1,0,0],[0,on?-1:1,0],[0,0,1]];
+const apply=(M,p)=>M.slice(0,2).map(r=>r[0]*p[0]+r[1]*p[1]+r[2]);
+const sides=p=>p.map((a,i)=>Math.hypot(p[(i+1)%p.length][0]-a[0],p[(i+1)%p.length][1]-a[1]));
+const angles=p=>p.map((a,i)=>{const n=p.length,b=p[(i+n-1)%n],c=p[(i+1)%n];
+  const u=[b[0]-a[0],b[1]-a[1]],v=[c[0]-a[0],c[1]-a[1]];
+  return Math.acos(Math.max(-1,Math.min(1,(u[0]*v[0]+u[1]*v[1])/(Math.hypot(...u)*Math.hypot(...v)))))*180/Math.PI});
+
+// ---- plot helpers ----
+const U=30,C=300,X=v=>C+v*U,Y=v=>C-v*U;
+function grid(){
+  let g="";
+  for(let i=-10;i<=10;i++){
+    g+=`<line x1="${X(i)}" y1="0" x2="${X(i)}" y2="600" stroke="var(--line)" stroke-width="${i?1:0}"/>`+
+       `<line x1="0" y1="${Y(i)}" x2="600" y2="${Y(i)}" stroke="var(--line)" stroke-width="${i?1:0}"/>`;
+    if(i&&i%2==0)g+=`<text x="${X(i)}" y="${C+14}" font-size="10" fill="var(--muted)" text-anchor="middle">${i}</text>`+
+       `<text x="${C-6}" y="${Y(i)+3}" font-size="10" fill="var(--muted)" text-anchor="end">${i}</text>`;
+  }
+  return g+`<line x1="0" y1="${C}" x2="600" y2="${C}" stroke="var(--axis)" stroke-width="1.5"/><line x1="${C}" y1="0" x2="${C}" y2="600" stroke="var(--axis)" stroke-width="1.5"/>`;
+}
+function poly(p,col,suf){
+  const pts=p.map(a=>X(a[0])+","+Y(a[1])).join(" ");
+  return `<polygon points="${pts}" fill="${col}" fill-opacity=".15" stroke="${col}" stroke-width="2.5" stroke-linejoin="round"/>`+
+    p.map((a,i)=>`<circle cx="${X(a[0])}" cy="${Y(a[1])}" r="4.5" fill="${col}"><title>${String.fromCharCode(65+i)}${suf} (${a[0].toFixed(2)}, ${a[1].toFixed(2)})</title></circle>`+
+    `<text x="${X(a[0])+8}" y="${Y(a[1])-8}" font-size="13" font-weight="600" fill="${col}">${String.fromCharCode(65+i)}${suf}</text>`).join("");
+}
+const fmt=n=>(Math.abs(n)<5e-10?0:n).toFixed(3);
+
+function update(){
+  const s=+$("s").value,t=+$("t").value,tx=+$("x").value,ty=+$("y").value,f=$("f").checked;
+  $("o_s").textContent=s.toFixed(2);$("o_t").textContent=t+"°";
+  $("o_x").textContent=tx.toFixed(1);$("o_y").textContent=ty.toFixed(1);
+  const M=mul(mul(mul(T(tx,ty),R(t)),F(f)),S(s));
+  const P=SHAPES[sel.value],Q=P.map(p=>apply(M,p));
+  $("plot").innerHTML=grid()+poly(P,"var(--orig)","")+poly(Q,"var(--img)","′");
+  $("mat").innerHTML=M.flat().map(v=>`<span>${fmt(v)}</span>`).join("");
+  $("tbl").innerHTML="<tr><th></th><th>Original</th><th>Image</th></tr>"+P.map((p,i)=>
+    `<tr><th>${String.fromCharCode(65+i)}</th><td>(${p[0].toFixed(1)}, ${p[1].toFixed(1)})</td><td>(${fmt(Q[i][0])}, ${fmt(Q[i][1])})</td></tr>`).join("");
+  const a=sides(P),b=sides(Q),r=b.map((v,i)=>v/a[i]),a1=angles(P),a2=angles(Q);
+  const sameR=r.every(v=>Math.abs(v-s)<1e-9),sameA=a1.every((v,i)=>Math.abs(v-a2[i])<1e-6);
+  $("chk").innerHTML=`<div>Side ratios (image ÷ original): <b>${r.map(v=>v.toFixed(2)).join(", ")}</b> ${sameR?'<span class="ok">✓ all equal s</span>':""}</div>`+
+    `<div>Angles preserved: ${sameA?'<span class="ok">✓ yes</span>':"no"} (${a1.map(v=>v.toFixed(0)+"°").join(", ")})</div>`;
+}
+["s","t","x","y","f"].forEach(id=>$(id).addEventListener("input",update));
+sel.addEventListener("change",update);
+$("reset").addEventListener("click",()=>{$("s").value=DEF.s;$("t").value=DEF.t;$("x").value=DEF.x;$("y").value=DEF.y;$("f").checked=DEF.f;sel.selectedIndex=0;update()});
+update();
+</script>
+</body>
+</html>
